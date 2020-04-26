@@ -1,0 +1,279 @@
+---
+title: "Regionalismo Americano em FHC e Lula"
+author: "Felipe Rocha"
+output: 
+  html_document: 
+    toc: TRUE
+    toc_float: TRUE
+
+---
+
+# Informações 
+
+Para assegurar que o artigo possa ser apropriadamente replicado, esse arquivo une todos os passos, comandos, arquivos e decisões tomados para analisar os dados e obter os resultados publicados. Em caso de dúvidas ou sugestões, por favor, envie e-mail para: rocha.felipeferreira@gmail.com 
+
+
+# Pacotes e Corpus
+
+Foram utilizados os seguintes comandos no ambiente do RStudio para analisar os dados: 
+
+
+```{r pacotes, message=FALSE, warning=FALSE}
+
+library(quanteda)
+library(readtext)
+library(tidyverse)
+library(gridExtra)
+library(reshape2)
+library(grid)
+library(ggthemes)
+library(factoextra)
+library(lexiconPT)
+
+```
+
+Quanto ao Corpus, ele foi [desenvolvido](http://www.scielo.br/scielo.php?script=sci_arttext&pid=S0034-73292011000200004) e [disponibilizado](http://www.nadd.prp.usp.br/cis/DetalheBancoDados.aspx?cod=B550&lng=pt-br) por Vilela and Neiva (2011). Basicamente, ele se constitui de dois arquivos txt, cada um deles contêm discursos pronunciados por FHC e por Lula. O seguinte comando foi usado para importar o Corpus:
+
+
+```{r importando corpus, message=FALSE, warning=FALSE}
+
+textos_originais <- readtext("corpus/*.txt", docvarsfrom = "filenames", docvarnames = "Presidente")
+
+corpus_original <- corpus(textos_originais)
+docvars(corpus_original, "Total_de_Discursos") <- c(253, 749)
+docvars(corpus_original, "Presidente") <- c("FHC", "LULA")
+docnames(corpus_original) <- c("FHC", "LULA")
+
+```
+
+Uma vez importado, é fundamental descobrir algumas informações descritivas do Corpus, conforme demonstrado no seguinte comando:
+
+
+```{r descritivos do corpus}
+
+ summary(corpus_original)
+
+```
+
+Uma forma adequada de visualizar as diferenças entre a quantidade de discursos coletados para cada um dos Presidentes é através de gráficos, conforme apresentado abaixo:
+
+```{r gráficos de frequencia de discurso, fig.align='center'}
+
+descritivos <- data.frame(summary(corpus_original))
+
+tokens<-ggplot(descritivos, aes(x=Presidente, y=Tokens)) + 
+  geom_bar(stat = "identity", fill = "white", colour = "black") + 
+  scale_y_continuous(labels = scales::comma) +
+  theme(axis.title = element_blank(),
+        axis.text = element_text(size = rel(1.2), colour = "black")) + ggtitle("Tokens")
+
+numero_discursos<-ggplot(descritivos, aes(x=Presidente, y=Total_de_Discursos)) + 
+  geom_bar(stat = "identity", fill = "white", colour = "black") + 
+  scale_y_continuous(labels = scales::comma) +
+  theme(axis.title = element_blank(),
+        axis.text = element_text(size = rel(1.2), colour = "black")) + ggtitle("Total de Discursos")
+
+grid.arrange(tokens, numero_discursos, ncol =2)
+
+
+```
+
+Fica clara a existência de uma assimetria entre a quantidade de discursos coletada para FHC e para Lula, no sentido em que o primeiro teve muito menos pronunciamentos coletados. Como se vê, ao considerarmos o número de unigramas/palavras (tokens), tem-se `r descritivos$Tokens[1]` para FHC e `r descritivos$Tokens[2]` para Lula. 
+
+
+Semelhantemente, a assimetria se mantem quando se considera o número total de discursos coletados, já que serão analisados `r descritivos$Total_de_Discursos[1]` discursos de FHC e `r descritivos$Total_de_Discursos[2]` discursos de Lula. As possíveis explicações para essa diferença podem ser encontradas no artigo. De qualquer modo, para minimizar os efeitos dessa diferença, serão utilizados os valores em escala percentual. 
+
+# Quantidade de menções a cada um dos blocos
+
+```{r dicionario}
+
+dicionario.blocos.regionais<-dictionary(list(
+  MERCOSUL = c("mercosul", "mercosur", "mercado comum do sul", "mercado común del sur", "common market of the south"),
+  ALADI_ALALC = c("aladi", "associação latino-americana de integração", "asociación latinoamericana de integración", "latin american integration association", "alalc", "associação latino-americana de livre comércio", "lafta", " latin american free trade association", "asociación latinoamericana de libre comercio"), 
+  CARICOM = c("caricom", "comunidade do caribe", "caribbean community", "comunidad del caribe"), 
+  ALCA = c("alca", "ftaa", "free trade area of the americas", "área de livre comércio das américas", "área de libre comercio de las américas"), 
+  OEA = c("oea", "oas", "organização dos estados americanos", " organization of american states", "organización de los estados americanos"),
+  NAFTA = c("nafta", "north american free trade agreement", "tratado norte-americano de livre comércio", "tlcan", "tratado de libre comercio de américa del norte"), 
+  CEPAL = c("cepal", "comissão econômica para a américa latina e o caribe", "eclac", "economic comission for latin america and the caribbean", "comisión económica para américa latina y el caribe"), 
+  CAN_Pacto_Andino = c("comunidade andina", "pacto andino", "comunidad andina", "andean community", "andean pact")))
+
+```
+
+
+Com esse dicionário, é possível verificar a quantidade de menções de cada um dos blocos regionais para cada Presidente, conforme demonstrado abaixo:
+
+```{r freq de menções aos blocos}
+
+freq_mencoes <- as.data.frame(dfm(corpus_original, dictionary = dicionario.blocos.regionais, tolower = TRUE))
+
+freq_mencoes$Presidentes <- c("FHC", "LULA")
+freq_mencoes$document<-NULL
+freq_mencoes$Presidentes<-factor(freq_mencoes$Presidentes)
+freq_mencoes<-melt(freq_mencoes, id.vars = "Presidentes")
+freq_mencoes$Tokens <- ifelse(freq_mencoes$Presidentes == "FHC", 458133, 1382172)
+freq_mencoes$Percentual <-freq_mencoes$value/freq_mencoes$Tokens*100
+freq_mencoes$Percentual <- round(freq_mencoes$Percentual, digits = 3)
+names(freq_mencoes) <- c("Presidentes", "Blocos", "Valores_Absolutos", "Tokens", "Valores_Percentuais")
+
+freq_mencoes$Blocos <- factor(freq_mencoes$Blocos, levels = c("MERCOSUL", "ALCA", "CAN_Pacto_Andino", "OEA", "CEPAL", "CARICOM", "ALADI_ALALC", "NAFTA"), labels = c("MERCOSUL", "ALCA", "CAN*", "OEA", "CEPAL", "CARICOM", "ALADI*", "NAFTA"))
+
+freq_mencoes_gather <- gather(freq_mencoes, key = "Tipo", value = "Valor", -Presidentes, -Blocos, -Tokens)
+
+
+nomes_faceta = c("Valores_Absolutos" = "Valores Absolutos", "Valores_Percentuais" = "Valores Percentuais")
+
+ggplot(freq_mencoes_gather, aes(x=reorder(Blocos, Valor), y= Valor, fill = Presidentes)) + geom_bar(stat = "identity") + coord_flip() + facet_wrap(~Tipo, scales = "free", labeller = as_labeller(nomes_faceta)) + theme_calc() + theme(axis.title = element_blank(), axis.text = element_text(size = rel(1.2), colour = "black"), strip.text = element_text(size = rel(1.2), colour = "black")) + scale_fill_gdocs() 
+
+
+```
+
+# Cluster dos blocos
+
+Baseado em:
+   - https://sillasgonzaga.github.io/2016-06-28-clusterizacaoPaises/ 
+   - http://lincolntneves.weebly.com/blog/anlise-de-cluster-no-r
+   - http://www.sthda.com/english/articles/28-hierarchical-clustering-essentials/92-visualizing-dendrograms-ultimate-guide/
+
+
+```{r cluster}
+
+cluster_df <- freq_mencoes %>% group_by(Blocos) %>% summarise(freq = sum(Valores_Absolutos))
+
+cluster_df_scaled <- scale(cluster_df$freq)
+rownames(cluster_df_scaled) <- cluster_df$Blocos
+
+cluster_dendograma <- hclust(dist(cluster_df_scaled), method = "ward.D")
+
+plot(cluster_dendograma, labels = cluster_df$Blocos, ylab = "")
+
+fviz_dend(cluster_dendograma, k = 3, k_colors = c("red", "blue", "black"), ylim = c(-1.4, 5), main = "", ylab = "") 
+
+```
+
+
+# Explorando o Mercosul
+
+Como o Mercosul e o ALCA são os blocos mais mencionados, faremos algumas outras explorações quantitativas antes de analisar qualitativamente os mesmos em conjunto com os outros blocos. Comecemos pelo Mercosul.
+
+```{r mercosul}
+
+mercosul <- tokens(corpus_original)
+mercosul <- tokens_keep(mercosul, c("mercosul", "mercosur", "mercado comum do sul", "mercado común del sur", "common market of the south"), case_insensitive = TRUE, window = 8)
+
+mercosul_dfm <- dfm(mercosul, tolower = TRUE, remove_numbers = TRUE, remove_punct = TRUE, remove = c(stopwords("portuguese"), "é", "mercosul", "president*", "y", "senh*", "mercosur", "quer*"))
+
+mercosul_dfm_stemmed <- dfm_wordstem(mercosul_dfm, language = "portuguese")
+
+```
+
+Primeiro, uma básica nuvem de palavras comparativas:
+
+```{r nuvem do mercosul}
+
+textplot_wordcloud(mercosul_dfm_stemmed, comparison = TRUE, color = c("black", "darkred"), max_words = 150, rotation = .25)
+
+```
+
+Segundo, análise de keyness dos adjetivos:
+
+
+```{r mercosul adjetivo}
+
+adjetivos <-sentiLex_lem_PT02 %>% filter(grammar_category == "Adj")
+
+mercosul_adj_dfm <- dfm_select(mercosul_dfm, pattern = adjetivos$term)
+mercosul_adj_data <- convert(mercosul_adj_dfm, to = "data.frame")
+mercosul_adj_data <- gather(mercosul_adj_data, key = "adjetivo", value = "valor", -document)
+
+mercosul_adj_qtd <- mercosul_adj_data %>% filter(valor > 0) %>% group_by(document) %>% count(document)
+mercosul_adj_qtd$tot <- c(126, 126)
+mercosul_adj_qtd$perc <- mercosul_adj_qtd$n/mercosul_adj_qtd$tot*100
+mercosul_adj_qtd$perc <- round(mercosul_adj_qtd$perc, 1)
+
+
+mercosul_adj_data <- filter(mercosul_adj_data, valor > 1)
+
+ggplot(mercosul_adj_data, aes(x=reorder(adjetivo, valor), y = valor, fill = document)) + coord_flip() + geom_col() + theme_fivethirtyeight() + theme(axis.title = element_blank(), axis.text = element_text(size = rel(1.1), colour = "black")) + scale_fill_economist() + labs(fill="")
+
+
+```
+
+```{r kwic mercosul}
+
+mercosul.kwic <- tokens(corpus_original)
+mercosul.kwic <- kwic(mercosul.kwic, window = 8, case_insensitive = TRUE, pattern = phrase(c("mercosul", "mercosur", "mercado comum do sul", "mercado común del sur", "common market of the south")))
+
+mercosul.kwic <- DT::datatable(mercosul.kwic)
+DT::saveWidget(mercosul.kwic, "mercosul.kwic.html")
+
+```
+
+
+# Explorando o ALCA
+
+
+Primeiro, uma básica nuvem de palavras comparativas:
+
+
+```{r alca}
+
+alca <- tokens(corpus_original)
+alca <- tokens_keep(alca, c("alca", "ftaa", "free trade area of the americas", "área de livre comércio das américas", "área de libre comercio de las américas"), case_insensitive = TRUE, window = 8)
+
+alca_dfm <- dfm(alca, tolower = TRUE, remove_numbers = TRUE, remove_punct = TRUE, remove = c(stopwords("portuguese"), "é", "president*", "y", "senh*", "quer*", "alca", "sobre", "ser", "the", "is", "was", "i"))
+
+alca_dfm_stemmed <- dfm_wordstem(alca_dfm, language = "portuguese")
+
+```
+
+
+```{r nuvem do alca}
+
+textplot_wordcloud(alca_dfm_stemmed, comparison = TRUE, color = c("black", "darkred"), max_words = 150, rotation = .45)
+
+```
+
+
+Segundo, análise de adj:
+
+```{r adj alca}
+
+alca_adj_dfm <- dfm_select(alca_dfm, pattern = adjetivos$term)
+
+alca_adj_data <- convert(alca_adj_dfm, to = "data.frame")
+alca_adj_data<- gather(alca_adj_data, key = "adjetivo", value = "valor", -document)
+
+alca_adj_qtd <- alca_adj_data %>% filter(valor > 0) %>% group_by(document) %>% count(document)
+
+alca_adj_qtd$tot <- c(25, 25)
+alca_adj_qtd$per <- alca_adj_qtd$n/alca_adj_qtd$tot*100
+
+
+ggplot(alca_adj_data, aes(x=reorder(adjetivo, valor), y=valor, fill = document)) + geom_col() + coord_flip() + theme_fivethirtyeight()  + theme(axis.title = element_blank(), axis.text = element_text(size = rel(1), colour = "black")) + scale_fill_economist() + labs(fill ="") 
+
+```
+
+```{r kwic alca}
+
+alca.kwic <- tokens(corpus_original)
+alca.kwic <- kwic(alca.kwic, window = 8, case_insensitive = TRUE, pattern = phrase(c("alca", "ftaa", "free trade area of the americas", "área de livre comércio das américas", "área de libre comercio de las américas")))
+
+alca.kwic <- DT::datatable(alca.kwic)
+DT::saveWidget(alca.kwic, "alca.kwic.html")
+
+```
+
+Por fim, é possível também verificar as similaridades entre FHC e Lula quanto ao MERCOSUL e à ALCA Para tanto:
+
+```{r similaridades}
+
+alca.simil<-textstat_simil(alca_dfm_stemmed, margin = "documents", method = "correlation")
+mercosul.simil<-textstat_simil(mercosul_dfm_stemmed, margin = "documents", method = "correlation")
+
+
+```
+
+
+
+
+
